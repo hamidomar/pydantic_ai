@@ -1,272 +1,135 @@
 """
-Human-in-the-loop integration scaffolder (single-file generator)
+CLI-only Human-in-the-loop example for pydantic_ai
 
-This script creates a directory `human_in_loop_examples/` with subdirectories for
-framework-specific minimal examples that demonstrate:
-  * Pausing agent execution to wait for a human
-  * Incorporating human feedback to guide agent behavior
-  * Providing simple interfaces for human monitoring and interaction
-
-The `pydantic_ai` example is implemented with two interfaces:
-  - CLI-based pause + feedback (synchronous)
-  - FastAPI-based HTTP endpoint for async pause/response + monitoring
-
-Two other framework placeholders are included to show how to add more.
+Save as: pydantic_ai/agent_cli_only.py
 
 Usage:
-  python human_in_loop_integration.py --output-dir ./human_in_loop_examples
+  python pydantic_ai/agent_cli_only.py
 
-Note: this is a scaffolding generator. The produced examples assume you have
-`pydantic_ai` installed for the pydantic_ai example. The FastAPI example requires
-`fastapi` and `uvicorn` if you choose to run it.
-
+Notes:
+- Replace the `Agent` stub with your real pydantic_ai Agent import/constructor.
+- Implement `google_auth_and_instantiate()` to perform Google provider auth and
+  return a properly constructed Agent(model, **params).
 """
-from pathlib import Path
-import argparse
-import textwrap
-
-ROOT_TEMPLATE = """
-# {title}
-
-{desc}
-"""
-
-PYDANTIC_CLI = """"""# pydantic_ai CLI human-in-the-loop example
-
-# This example demonstrates a minimal pattern for pausing agent execution,
-# collecting human feedback, and continuing execution based on that feedback.
-
-# Assumptions:
-#   - `pydantic_ai` exposes an Agent-like interface. Replace the stubbed
-#     `SimpleAgent` below with your real agent class or import from your
-#     project's module.
-
+from typing import Any, Dict, Optional
 import time
-from typing import Any, Dict
+import uuid
 
-# ----- STUB: replace with actual import from your pydantic_ai package -----
-class SimpleAgent:
-    def __init__(self, name: str = "pydantic-agent"):
-        self.name = name
+# -------------------- Agent & Auth stubs --------------------
+# Replace or implement these with your real code.
+
+class Agent:
+    """
+    Minimal Agent interface expected by this example.
+
+    Replace with: Agent(model, <other_params>)
+    """
+    def __init__(self, model: str, **kwargs):
+        self.model = model
+        self.kwargs = kwargs
         self.state: Dict[str, Any] = {}
 
-    def step(self, input_data: str) -> Dict[str, Any]:
-        # pretend the agent reasons for a second and returns a result that
-        # indicates it wants human approval for a branch
-        time.sleep(1)
-        # If agent sees the word 'risk' it asks for human approval
-        if 'risk' in input_data.lower():
-            return {"action": "ask_human", "reason": "high_risk_decision", "proposal": input_data}
-        return {"action": "complete", "result": f"processed: {input_data}"}
+    def run_step(self, input_text: str) -> Dict[str, Any]:
+        """
+        Run a single step of the agent. Return a dict describing the outcome.
 
-# ----- CLI loop that demonstrates pause-and-feedback -----
+        Expected return shapes used by this example:
+          {"action": "ask_human", "proposal": ..., "reason": ...}
+          {"action": "complete", "result": ...}
+        """
+        # Dummy behavior: short "thinking" delay, then ask human if 'risk' in input
+        time.sleep(0.25)
+        if 'risk' in input_text.lower():
+            return {"action": "ask_human", "proposal": input_text, "reason": "high_risk_decision"}
+        return {"action": "complete", "result": f"processed: {input_text}"}
 
-def cli_run():
-    agent = SimpleAgent()
-    print("pydantic_ai CLI human-in-the-loop demo")
-    print("Type 'quit' to exit. Type a sentence containing 'risk' to trigger human approval.")
+    def apply_feedback(self, token: str, approved: bool, notes: Optional[str] = None) -> None:
+        """
+        Apply human feedback to the agent's internal state or runloop.
+        Replace or extend this to hook into your agent's real feedback APIs.
+        """
+        self.state['last_feedback'] = {"token": token, "approved": approved, "notes": notes, "at": time.time()}
+
+
+def google_auth_and_instantiate() -> Agent:
+    """
+    Placeholder for authentication + Agent instantiation using Google provider.
+
+    Implement Google OAuth / service account / ADC auth here and construct the
+    Agent instance with the provider-backed client/credentials.
+
+    Example pseudocode (do not treat as runnable):
+      credentials = google.auth.default()
+      client = SomeProviderClient(credentials=credentials)
+      return Agent(model='gpt-xyz', client=client, other_param=...)
+
+    Currently returns a placeholder Agent. Replace before production use.
+    """
+    # TODO: implement real Google provider auth + create Agent(model, **params)
+    return Agent(model='placeholder-google-model')
+
+# -------------------- CLI human-in-the-loop loop --------------------
+
+def cli_loop(agent: Agent):
+    print("pydantic_ai — CLI human-in-the-loop demo (CLI-only)")
+    print("Type 'quit' to exit. Type input containing 'risk' to trigger a human pause.\n")
 
     while True:
-        user_input = input("[User] > ")
-        if not user_input:
-            continue
-        if user_input.strip().lower() in ('quit','exit'):
+        try:
+            user_input = input("[User] > ")
+        except (EOFError, KeyboardInterrupt):
+            print("\nExiting...")
             break
 
-        out = agent.step(user_input)
+        if not user_input:
+            continue
+        if user_input.strip().lower() in ('quit', 'exit'):
+            print("Goodbye.")
+            break
 
-        if out.get('action') == 'ask_human':
-            print("\nAgent requests human review:\n")
-            print("  Proposal:", out.get('proposal'))
-            print("  Reason:", out.get('reason'))
-            # Pause for human decision
+        outcome = agent.run_step(user_input)
+
+        action = outcome.get('action')
+        if action == 'ask_human':
+            token = str(uuid.uuid4())
+            proposal = outcome.get('proposal')
+            reason = outcome.get('reason')
+
+            print("\n--- AGENT PAUSE: HUMAN REVIEW REQUIRED ---")
+            print(f"Token : {token}")
+            print(f"Reason: {reason}")
+            print("Proposal:")
+            print(proposal)
+            print("-----------------------------------------\n")
+
+            # Pause: collect human decision
             while True:
                 decision = input("Approve proposal? (y/n) > ").strip().lower()
-                if decision in ('y','n'):
+                if decision in ('y', 'n'):
                     break
                 print("Please type 'y' or 'n'.")
 
-            if decision == 'y':
-                print("Human approved. Agent continues and applies the proposal.")
-                # In a real agent you might call agent.apply_feedback(...)
-                agent.state['last_decision'] = 'approved'
-                print("Result: proposal applied\n")
+            notes = input("Optional notes (press Enter to skip) > ").strip() or None
+            approved = (decision == 'y')
+
+            # Apply human feedback to the agent (hook into real agent API here)
+            agent.apply_feedback(token=token, approved=approved, notes=notes)
+
+            if approved:
+                print("\nHuman approved. Agent will apply the proposal and continue.\n")
+                # If agent needs to perform the approved action immediately, you would
+                # call into the agent's execution method here (not shown in stub).
             else:
-                print("Human rejected. Agent will choose an alternate plan.\n")
-                agent.state['last_decision'] = 'rejected'
-                # agent could be instructed to replan here
+                print("\nHuman rejected. Agent will replan or abort per its policy.\n")
+                # Trigger agent replanning or safe-fail behavior as appropriate.
 
+        elif action == 'complete':
+            print("Agent result:", outcome.get('result'), "\n")
         else:
-            print("Agent result:", out.get('result'))
-
-if __name__ == '__main__':
-    cli_run()
-""""""
-
-PYDANTIC_FASTAPI = """"""# pydantic_ai FastAPI human-in-the-loop example
-
-# Run with:
-#   uvicorn agent_fastapi:app --reload --port 8001
-
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
-from typing import Dict, Optional
-import uuid
-import threading
-import time
-
-app = FastAPI(title='pydantic_ai HIL (FastAPI)')
-
-# Simple in-memory store for paused decisions
-PAUSES: Dict[str, Dict] = {}
-
-# ----- STUB agent (replace with real pydantic_ai agent) -----
-class SimpleAgent:
-    def __init__(self):
-        self.id = 'pydantic-agent'
-
-    def plan(self, prompt: str):
-        # signal pause if 'risk' in prompt
-        if 'risk' in prompt.lower():
-            token = str(uuid.uuid4())
-            return {"pause": True, "pause_token": token, "proposal": prompt, "reason": "requires_human"}
-        return {"pause": False, "result": f"ok: {prompt}"}
-
-agent = SimpleAgent()
-
-class RunRequest(BaseModel):
-    prompt: str
-
-class PauseResponse(BaseModel):
-    token: str
-    proposal: str
-    reason: str
-
-class Decision(BaseModel):
-    approved: bool
-    notes: Optional[str] = None
-
-@app.post('/run')
-async def run(req: RunRequest):
-    plan = agent.plan(req.prompt)
-    if plan.get('pause'):
-        token = plan['pause_token']
-        PAUSES[token] = {"proposal": plan['proposal'], "reason": plan['reason'], "created_at": time.time(), "decision": None}
-        return PauseResponse(token=token, proposal=plan['proposal'], reason=plan['reason'])
-    return {"result": plan['result']}
-
-@app.get('/pauses')
-async def list_pauses():
-    # return current pauses for monitoring
-    return PAUSES
-
-@app.post('/decide/{token}')
-async def decide(token: str, d: Decision):
-    entry = PAUSES.get(token)
-    if not entry:
-        raise HTTPException(status_code=404, detail='pause token not found')
-    entry['decision'] = {'approved': d.approved, 'notes': d.notes, 'decided_at': time.time()}
-    # In a real system you'd notify the agent runloop to continue. This demo simulates that.
-    return {"status": "recorded", "token": token}
-
-# Simple background cleaner (optional)
-def cleaner():
-    while True:
-        now = time.time()
-        stale = [k for k,v in PAUSES.items() if now - v['created_at'] > 60*60]
-        for k in stale:
-            PAUSES.pop(k, None)
-        time.sleep(60)
-
-threading.Thread(target=cleaner, daemon=True).start()
-""""""
-
-PLACEHOLDERS = """"""# placeholders for other frameworks
-
-# Example placeholder for 'framework_x' - shows recommended integration points
-
-README = """
-# Framework X - Human-in-the-loop example (placeholder)
-
-This file describes where to add code to support:
- - Pausing the agent for a human decision
- - Accepting human feedback and applying it to the agent
- - Exposing a monitoring endpoint/UI
-
-Suggested approach:
- - Provide a `pause()` primitive on the agent run context that creates an external ID
- - Provide a `resume(pause_id, decision)` API that the UI/human can call
- - Emit events or logs to a /monitoring endpoint for visibility
-"""
-""""""
-
-GENERATOR = f"""
-# Auto-generated scaffolding for human-in-the-loop examples
-# Generated by human_in_loop_integration.py
-
-"""
-
-def write_file(path: Path, content: str):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content, encoding='utf8')
-
-
-def generate(output_dir: Path):
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    # pydantic_ai CLI example
-    pyd_cli_path = output_dir / 'pydantic_ai' / 'agent_cli.py'
-    write_file(pyd_cli_path, PYDANTIC_CLI)
-
-    # pydantic_ai FastAPI example
-    pyd_fastapi_path = output_dir / 'pydantic_ai' / 'agent_fastapi.py'
-    write_file(pyd_fastapi_path, PYDANTIC_FASTAPI)
-
-    # README for pydantic_ai
-    pyd_readme = textwrap.dedent('''
-    # pydantic_ai human-in-the-loop examples
-
-    This folder contains two minimal examples demonstrating human-in-the-loop
-    patterns with `pydantic_ai`:
-
-    - `agent_cli.py`: synchronous CLI pause + human feedback
-    - `agent_fastapi.py`: HTTP-driven pause + /pauses monitoring endpoint
-
-    Replace the stubbed SimpleAgent with your real agent class and wire the
-    `pause` / `decision` flow to your agent runloop.
-    ''')
-    write_file(output_dir / 'pydantic_ai' / 'README.md', pyd_readme)
-
-    # placeholders for two other frameworks
-    write_file(output_dir / 'framework_x' / 'README.md', PLACEHOLDERS)
-    write_file(output_dir / 'framework_y' / 'README.md', PLACEHOLDERS)
-
-    # top-level README
-    top_readme = textwrap.dedent('''
-    # Human-in-the-loop integration examples
-
-    Generated examples to explore how frameworks support:
-      * Pausing agent execution to wait for a human
-      * Incorporating human feedback to guide agent behavior
-      * Exposing simple monitoring / interaction surfaces for humans
-
-    Run the pydantic_ai CLI example:
-      python pydantic_ai/agent_cli.py
-
-    Run the FastAPI example (if you have fastapi + uvicorn):
-      uvicorn pydantic_ai/agent_fastapi:app --reload --port 8001
-
-    Replace the provided SimpleAgent stubs with your real agent implementations
-    and connect `pause`/`resume` primitives to your agent runloop.
-    ''')
-    write_file(output_dir / 'README.md', top_readme)
-
-    print(f"Wrote examples to: {output_dir.resolve()}")
+            print("Unknown agent action:", action, "\n")
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--output-dir', '-o', default='human_in_loop_examples')
-    args = parser.parse_args()
-    generate(Path(args.output_dir))
-""
+    # Instantiate agent via the Google auth + instantiation stub (replace as needed)
+    agent = google_auth_and_instantiate()
+    cli_loop(agent)
