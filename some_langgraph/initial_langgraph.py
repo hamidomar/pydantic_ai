@@ -1,18 +1,30 @@
 from langchain_google_vertexai import ChatVertexAI
+from langgraph.graph import StateGraph, START, END
+from typing import Annotated
+from typing_extensions import TypedDict
+from langgraph.graph.message import add_messages
 
-# Initialize the model - it will automatically use your ADC credentials
+# Initialize the model - will automatically use ADC
 llm = ChatVertexAI(
     model="gemini-2.5-flash",
-    temperature=0,
-    max_tokens=None,
-    max_retries=6,
+    project="YOUR_PROJECT_ID",
+    location="us-central1",  # or your preferred region
+    temperature=0
 )
 
-# Simple usage
-messages = [
-    ("system", "You are a helpful assistant."),
-    ("human", "What is the capital of France?"),
-]
+# Define your state
+class State(TypedDict):
+    messages: Annotated[list, add_messages]
 
-response = llm.invoke(messages)
-print(response.content)
+# Create your graph
+graph_builder = StateGraph(State)
+
+# Add your nodes and edges
+def chatbot(state: State):
+    return {"messages": [llm.invoke(state["messages"])]}
+
+graph_builder.add_node("chatbot", chatbot)
+graph_builder.add_edge(START, "chatbot")
+graph_builder.add_edge("chatbot", END)
+
+graph = graph_builder.compile()
