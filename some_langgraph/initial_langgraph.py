@@ -1,30 +1,32 @@
-from langchain_google_vertexai import ChatVertexAI
+# file: langgraph_stream_sync.py
 from langgraph.graph import StateGraph, START, END
-from typing import Annotated
-from typing_extensions import TypedDict
-from langgraph.graph.message import add_messages
+from langgraph.nodes import LLMNode    # LangGraph LLM node (high-level)
+from langchain.chat_models import ChatOpenAI
+from langchain.schema import HumanMessage
 
-# Initialize the model - will automatically use ADC
-llm = ChatVertexAI(
-    model="gemini-2.5-flash",
-    project="YOUR_PROJECT_ID",
-    location="us-central1",  # or your preferred region
-    temperature=0
-)
+# NOTE: APIs/names below mirror the LangGraph docs shape.
+# If your install exposes slightly different names, adapt imports accordingly.
 
-# Define your state
-class State(TypedDict):
-    messages: Annotated[list, add_messages]
+def build_graph():
+    graph = StateGraph()
+    # A simple LLM node that accepts `topic` and emits a story.
+    llm = LLMNode(
+        name="write_story",
+        llm=ChatOpenAI(streaming=True, temperature=0.7, model="gpt-4o-mini"),  # streaming enabled
+        prompt_template="Write a short, vivid story about: {topic}"
+    )
+    graph.add_node(START, "start")
+    graph.add_node(llm, "write_story")
+    graph.add_node(END, "end")
+    graph.add_edge(START, llm)
+    graph.add_edge(llm, END)
+    return graph
 
-# Create your graph
-graph_builder = StateGraph(State)
-
-# Add your nodes and edges
-def chatbot(state: State):
-    return {"messages": [llm.invoke(state["messages"])]}
-
-graph_builder.add_node("chatbot", chatbot)
-graph_builder.add_edge(START, "chatbot")
-graph_builder.add_edge("chatbot", END)
-
-graph = graph_builder.compile()
+if __name__ == "__main__":
+    graph = build_graph()
+    inputs = {"topic": "a lighthouse keeper who finds a secret map"}
+    # stream_mode "updates" returns incremental updates (tokens / partial messages)
+    for chunk in graph.stream(inputs, stream_mode="updates"):
+        # chunk is usually a dict-like event describing what changed.
+        # Print it raw so you can inspect structure (token, node, state, etc.)
+        print("CHUNK:", chunk)
